@@ -25,7 +25,10 @@ def bin_by_minutes(given_time, bin_amt):
 # top 10 username:password combo attempts
 class CowrieAnalyzer:
     def __init__(self, json_dir='log'):
-        self.files = glob.glob(json_dir + os.sep + 'cowrie.jso*')
+        self.ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        print("json_dir: " + os.path.join(json_dir, 'cowrie*.json'))
+        # self.files = glob.glob(json_dir + os.sep + '*.json')
+        self.files = glob.glob(os.path.join(self.ROOT_PATH, json_dir, 'cowrie*.json'))
         self.num_ssh, self.num_telnet = 0, 0
         self.src_ip_cnt = defaultdict(int)  # defaultdict, so no special case for the first instance of a count
         self.username_cnt = defaultdict(int)
@@ -34,23 +37,44 @@ class CowrieAnalyzer:
         self.ssh_times_cnt = defaultdict(int)
         self.telnet_times_cnt = defaultdict(int)
         self.geoip_lookup = defaultdict(int)
+        self.whitelist = ['192.168.100.100', '192.168.16.51', '192.168.16.50', '127.0.0.1']
 
-    def plot(self):
+    def plot(self, data, 
+             title = 'Attack Attempts per Day', 
+             xlabel = 'Time', 
+             ylabel= 'SSH Attempts', 
+             type='line'):
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Attack Attempts')
-        ax.set_title('Attack Attempts per Day')
-        dates, ssh_attempts = zip(*sorted(self.ssh_times_cnt.items()))
-        ax.plot(dates, ssh_attempts, 'b-', label='SSH Attempts')
-        dates, telnet_attempts = zip(*sorted(self.telnet_times_cnt.items()))
-        ax.plot(dates, telnet_attempts, 'r-', label='Telnet Attempts')
-        ax.legend()
-        fig.autofmt_xdate()
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        if type == 'line':
+            x_data, y_data = zip(*sorted(data.items()))
+            ax.plot(x_data, y_data, 'b-')
+            fig.autofmt_xdate()
+        elif type == 'bar':
+            x_data, y_data = zip(*sorted(data.items(), key=lambda x: x[1]))
+            x_data = x_data[-10:]
+            y_data = y_data[-10:]
+            # print(x_data, y_data)
+
+            fig.subplots_adjust(left=0.4)
+
+            plt.barh(x_data, y_data)
+            plt.yticks(rotation=30)
+        # dates, telnet_attempts = zip(*sorted(self.telnet_times_cnt.items()))
+        # ax.plot(dates, telnet_attempts, 'r-', label='Telnet Attempts')
+        # ax.legend()
         # plt.show()
-        fig.savefig('attack_attempts.png')
+        plt.title(title)
+        fig_name = title.replace(' ', '_') + '.png'
+        fig_name = os.path.join(self.ROOT_PATH,'Cowrie-Analyzer' ,'img', fig_name)
+        print("saving figure to " + os.path.basename(fig_name))
+        fig.savefig(fig_name)
 
     def run(self):
+        print('analyzing ' + str(len(self.files)) + ' files')
         total_contents = []
         for file in self.files:
             with open(file) as openfile:
@@ -60,14 +84,21 @@ class CowrieAnalyzer:
         num_ssh, num_telnet = 0, 0
         for event in total_contents:
             if 'cowrie.login' in event['eventid']:
-                if 'SSH' in event['system']:
-                    num_ssh += 1
-                    time = bin_by_hours(parse(event['timestamp']), 24)
-                    self.ssh_times_cnt[time] += 1
-                elif 'Telnet' in event['system']:
-                    num_telnet += 1
-                    time = bin_by_hours(parse(event['timestamp']), 24)
-                    self.telnet_times_cnt[time] += 1
+                if event['src_ip'] in self.whitelist:
+                    continue
+                # only ssh
+                num_ssh += 1
+                time = bin_by_hours(parse(event['timestamp']), 24)
+                self.ssh_times_cnt[time] += 1
+
+                # if 'SSH' in event['system']:
+                #     num_ssh += 1
+                #     time = bin_by_hours(parse(event['timestamp']), 24)
+                #     self.ssh_times_cnt[time] += 1
+                # elif 'Telnet' in event['system']:
+                #     num_telnet += 1
+                #     time = bin_by_hours(parse(event['timestamp']), 24)
+                #     self.telnet_times_cnt[time] += 1
 
                 self.src_ip_cnt[event['src_ip']] += 1
                 self.username_cnt[event['username']] += 1
@@ -89,7 +120,22 @@ class CowrieAnalyzer:
         for creds in sorted(self.userpass_cnt.items(), key=operator.itemgetter(1), reverse=True)[:10]:
             print(creds)
 
-        self.plot()
+        self.plot(data = self.ssh_times_cnt, ylabel = 'SSH Attempts', type='line')
+        self.plot(data = self.username_cnt, 
+             title = 'Top 10 Username Attempts', 
+             xlabel = 'Count', 
+             ylabel= 'Username', 
+             type='bar')
+        self.plot(data = self.pass_cnt, 
+             title = 'Top 10 Password Attempts', 
+             xlabel = 'Count', 
+             ylabel= 'Password', 
+             type='bar')
+        self.plot(data = self.userpass_cnt, 
+             title = 'Top 10 Username-Password Pair', 
+             xlabel = 'Count', 
+             ylabel= 'Username-Password', 
+             type='bar')
         if os.path.isfile('GeoLite2-Country.mmdb'):
             self.map_ips()
 
@@ -117,4 +163,4 @@ class CowrieAnalyzer:
 
 # run from the command line
 if __name__ == '__main__':
-    CowrieAnalyzer().run()
+    CowrieAnalyzer(json_dir='24032023_COWRIE_LOGS').run()
